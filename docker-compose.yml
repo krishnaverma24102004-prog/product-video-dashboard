@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    # published on the host's loopback only; the API must not be reachable from the LAN
+    ports: ["127.0.0.1:4000:4000"]
+    env_file: [backend/.env]
+    environment:
+      # inside the container the server must listen on all container interfaces, or the port
+      # mapping can't reach it; exposure is limited by the 127.0.0.1 host binding above
+      HOST: 0.0.0.0
+      PORT: 4000
+      DB_PATH: /data/app.db
+      IG_STATE_PATH: /sessions/ig.json
+      MODEL_CACHE_DIR: /models
+    volumes:
+      - data:/data
+      - ./backend/.sessions:/sessions   # created by `npm run ig:login` on the host
+      - models:/models                  # CLIP weights, downloaded once
+volumes:
+  data:
+  models:

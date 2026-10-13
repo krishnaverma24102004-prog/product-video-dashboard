@@ -1,0 +1,27 @@
+{
+  "name": "pvd-backend",
+  "version": "1.0.0",
+  "description": "Product Video Discovery backend",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "ig:login": "node scripts/ig-login.js",
+    "test": "vitest run"
+  },
+  "type": "module",
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "pino": "^10.4.0",
+    "pino-pretty": "^13.2.0",
+    "playwright": "^1.64.0",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.4"
+  }
+}
