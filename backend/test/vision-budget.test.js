@@ -61,9 +61,25 @@ describe('gemini circuit breaker', () => {
     const session = g.createVisionSession();
     const cands = Array.from({ length: 20 }, (_, i) => ({ uid: `u${i}`, clip: 50 + i, caption: 'x', jpeg }));
     await brain.scoreWithVlm({ jpeg: null, text: 'tee', name: 'tee' }, cands, { session });
-    expect(calls).toHaveLength(3); // one batch x three models, then the breaker blocks batches 2 and 3
-    expect(session).toMatchObject({ open: true, reason: 'server', calls: 3 });
+    // one batch: three models, then the 503 models once more after a pause; then the breaker blocks batches 2 and 3
+    expect(calls).toHaveLength(6);
+    expect(session).toMatchObject({ open: true, reason: 'server', calls: 6 });
     expect(cands.every((c) => c.vlm == null)).toBe(true);
+  });
+
+  it('recovers from a 503 spike: the 503 models are retried once and an answer is used', async () => {
+    const calls = stubFetch((model, n) => (n <= 3 ? resp(503, 'high demand') : ok({ fine: true })));
+    const session = g.createVisionSession({ deadline: Date.now() + 60_000 });
+    await expect(g.generate(parts, schema, { session })).resolves.toEqual({ fine: true });
+    expect(calls.map((c) => c.model)).toEqual(['m-primary', 'm-second', 'm-third', 'm-primary']);
+    expect(session.open).toBe(false);
+  });
+
+  it('retries only the 503 models, not quota (429) ones', async () => {
+    const calls = stubFetch((model) => (model === 'm-primary' ? resp(503, 'high demand') : resp(429, QUOTA_BODY)));
+    const session = g.createVisionSession({ deadline: Date.now() + 60_000 });
+    await expect(g.generate(parts, schema, { session })).rejects.toBeInstanceOf(g.VisionUnavailableError);
+    expect(calls.map((c) => c.model)).toEqual(['m-primary', 'm-second', 'm-third', 'm-primary']); // 429s not retried
   });
 
   it('a new search gets a fresh session (benched models are still tried once)', async () => {

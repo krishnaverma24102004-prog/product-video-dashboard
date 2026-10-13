@@ -154,10 +154,10 @@ function exhaustedReason(kinds) {
  * One structured-JSON request. Each configured model is tried at most once (no backoff sleeps);
  * when all of them fail with quota/transient errors the session breaker opens for the rest of the search.
  */
-export async function generate(parts, schema, { session = createVisionSession() } = {}) {
+export async function generate(parts, schema, { session = createVisionSession(), only = null } = {}) {
   session.assertAvailable();
   const failures = [];
-  const order = attemptOrder();
+  const order = only ?? attemptOrder();
   const callEnd = Date.now() + callBudgetMs();
   for (const [i, model] of order.entries()) {
     if (i > 0 && callEnd - Date.now() < Math.min(3000, callBudgetMs() / 10)) {
@@ -226,6 +226,15 @@ export async function generate(parts, schema, { session = createVisionSession() 
     else benchedUntil.set(model, Date.now() + BENCH_MS);
     failures.push({ model, kind, status });
     log.warn({ status, kind, model, err: error?.message }, 'gemini model unavailable, trying next model');
+  }
+  // "high demand" 503s are spikes that often clear within seconds (live: gemini-3.1-flash-lite alternated 503/200).
+  // Retry the models that answered 503 once, after a short pause; never the ones that hung (timeouts).
+  const spiked = failures.filter((f) => f.status === 503).map((f) => f.model);
+  if (!only && spiked.length && session.remainingMs() > 20000) {
+    for (const m of spiked) benchedUntil.delete(m);
+    log.info({ models: spiked }, 'gemini 503 on every model; retrying the 503 models once');
+    await sleep(1500);
+    return generate(parts, schema, { session, only: spiked });
   }
   session.trip(exhaustedReason(failures.map((f) => f.kind)), failures.map((f) => `${f.model}: ${f.status ?? f.kind}`).join(', ') || 'no usable model');
   log.warn({ reason: session.reason, detail: session.detail }, 'all gemini models failed; vision off for the rest of this search');
