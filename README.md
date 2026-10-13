@@ -8,12 +8,31 @@ Type a product name, paste a product link, or upload a photo, and get 20+ Instag
 backend/   Node.js 24 + Express: pipeline, collectors, vision, SQLite
 frontend/  React 19 + Vite: single-page dashboard
 docs/      test results, demo script, HOW-SEARCH-WORKS (step-by-step: what a search returns, how and why)
-scripts/   docker-start.ps1 / docker-start.sh (one-command Docker run)
+scripts/   docker-start.ps1/.sh (one-command Docker run), set-keys.ps1/.sh (add/replace Gemini key + Instagram session)
 ```
 
 **Why did a search return what it did?** `cd backend && node scripts/explain-search.js "<product>"` prints the whole story of one search: what the brain understood, which queries ran, what was de-duplicated, which judge model scored the videos, and why each video was accepted or rejected. The walkthrough is in [`docs/HOW-SEARCH-WORKS.md`](docs/HOW-SEARCH-WORKS.md).
 
-## Quick start
+## Quick start (one command, Docker)
+
+```bash
+git clone https://github.com/krishnaverma24102004-prog/product-video-dashboard.git && cd product-video-dashboard && docker compose up -d --build
+```
+
+Open **http://localhost:4000**. That's the whole app: the React dashboard and the API in one container (first build about 5–10 min; the first search downloads the CLIP model once).
+
+Then add the keys (read hidden, saved to `backend/.env`, and the container is restarted automatically):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\set-keys.ps1     # Windows
+sh scripts/set-keys.sh                                             # macOS / Linux
+```
+
+- `GEMINI_API_KEY` is free from https://aistudio.google.com/apikey. A key from a **new Google Cloud project** gets fresh free quota.
+- `IG_SESSION_ID` is the `sessionid` cookie of an Instagram account you're logged in with (browser DevTools → Application → Cookies → instagram.com).
+- Without keys the app still starts: it runs CLIP-only, and Instagram shows "not configured".
+
+## Quick start (without Docker)
 
 ```bash
 # 1. backend
@@ -34,7 +53,7 @@ The first search downloads the CLIP model once: about **580 MB** (`vision_model.
 
 **Windows / PowerShell:** if `npm` is blocked by the execution policy, use `npm.cmd` (e.g. `npm.cmd run ig:login`). `ig:login` opens your installed **Edge or Chrome** (set `LOGIN_BROWSER=msedge|chrome` to choose). Playwright's bundled Chromium can be blocked by Windows Smart App Control, so `HEADLESS=false` may not work on such machines; collection itself uses Playwright's headless shell.
 
-**Docker (one command):** put `GEMINI_API_KEY` and `IG_SESSION_ID` in `backend/.env` (or run `npm run ig:login` on the host first, because it needs a visible browser). Then:
+**Docker details:** `backend/.env` is optional for `docker compose` (it's passed in as environment variables and never copied into the image). Instead of `IG_SESSION_ID` you can run `npm run ig:login` on the host, because it needs a visible browser; the saved session is mounted into the container. Equivalent commands:
 
 ```bash
 docker compose up --build         # dashboard + API on http://localhost:4000
@@ -104,7 +123,7 @@ GET /api/health              session/vision status shown in the UI header
 | Login wall / checkpoint / expired session | Detected from the URL or the API's `login_required` / `checkpoint_required` message (or 401/403) and raised as a fatal error for that source only. The UI shows "re-run `npm run ig:login`". Meta continues. |
 | Timeouts / transient errors | Each collector call is bounded by min(`SOURCE_TIMEOUT_MS`, time left before the search deadline), with 2 tries. A failing query is noted and the next one runs. |
 | Search duration | Every search has a deadline (`SEARCH_DEADLINE_MS`, default 240 s). After it passes, no new query rounds start and the search finishes with what it has (shown as "time limit reached"). A watchdog at deadline + `SEARCH_WATCHDOG_GRACE_MS` (90 s) fails a runaway search without saving partial results. |
-| Gemini quota / overload | Calls are spaced to `GEMINI_RPM` and capped per search (`GEMINI_MAX_CALLS_PER_SEARCH`, 24). Each call tries each model in `GEMINI_MODEL` + `GEMINI_FALLBACK_MODELS` **at most once**, with no long backoff. A model that hangs is abandoned after **25 s while a healthy fallback model remains** (60 s, or the time left, otherwise), one request may spend at most **50 s across the whole chain** (`GEMINI_CALL_BUDGET_MS`; in a Docker test with Gemini overloaded, walking all five models took ~2 min per request and starved Meta collection), and a failing model is benched for **15 min**. Each Gemini model has its own free-tier quota, so the default chain is five models on one key: `gemini-3.5-flash` → `gemini-3.1-flash-lite` → `gemini-flash-latest` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest`. On a 9-ad hand-labelled judge bench (right model, other model, competitor, logo-only, accessories), `gemini-3.1-flash-lite` and `gemini-flash-lite-latest` scored 9/9; Gemma 4 (26B/31B) was dropped (slow, malformed JSON). If every model is out of quota or failing, a **circuit breaker** stops all Gemini calls for the rest of that search and the remaining videos are scored CLIP-only. Auth errors (401/403, invalid key) and invalid requests are never retried. The results page shows a notice with the reason, calls used and how many videos were CLIP-only. |
+| Gemini quota / overload | Calls are spaced to `GEMINI_RPM` and capped per search (`GEMINI_MAX_CALLS_PER_SEARCH`, 24). Each call tries each model in `GEMINI_MODEL` + `GEMINI_FALLBACK_MODELS` **at most once**, with no long backoff. A model that hangs is abandoned after **25 s while a healthy fallback model remains** (60 s, or the time left, otherwise), one request may spend at most **50 s across the whole chain** (`GEMINI_CALL_BUDGET_MS`; in a Docker test with Gemini overloaded, walking all five models took ~2 min per request and starved Meta collection), and a failing model is benched for **15 min**. Each Gemini model has its own free-tier quota, so the default chain is five models on one key: `gemini-3.5-flash` → `gemini-3.1-flash-lite` → `gemini-flash-latest` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest`. On a 9-ad hand-labelled judge bench (right model, other model, competitor, logo-only, accessories), `gemini-3.1-flash-lite` and `gemini-flash-lite-latest` scored 9/9; Gemma 4 (26B/31B) was dropped (slow, malformed JSON). OpenRouter's free vision models were also checked and not used. The only ones with JSON output are the same Gemma 4 models, served by a single provider (Google AI Studio). Free models are limited to 20 requests/min and **50 requests/day** without $10 of purchased credits, which is about 2 searches a day. If every model is out of quota or failing, a **circuit breaker** stops all Gemini calls for the rest of that search and the remaining videos are scored CLIP-only. Auth errors (401/403, invalid key) and invalid requests are never retried. The results page shows a notice with the reason, calls used and how many videos were CLIP-only. |
 | Missing thumbnail / expired CDN URL | Candidate skipped (it can't be scored). The UI falls back to the thumbnail proxy, and to "Open original" when inline video expires. |
 | Fewer than 20 usable videos | The source walks an ordered query list: model queries, hashtags, then widening variants (up to `MAX_QUERY_ROUNDS`, default 8; the deadline still bounds it). For Meta, the broad branded queries (brand + product type, then the brand) come **before** the "… review" / "… sale" variants, because those variants mostly returned the same ads again. Meta scrolls until it has collected up to 80 ads per query (2× the limit), because more than half of a page is often reseller copies removed as duplicates. If it still falls short, the tab count turns amber and a notice lists what was tried and why. It never fails silently. |
 

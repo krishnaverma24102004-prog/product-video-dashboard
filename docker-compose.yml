@@ -3,7 +3,11 @@ services:
     build: .
     # published on the host's loopback only; the API must not be reachable from the LAN
     ports: ["127.0.0.1:4000:4000"]
-    env_file: [backend/.env]
+    # keys/session live in backend/.env (never baked into the image). Optional, so `docker compose up`
+    # works on a fresh clone: without keys the app runs CLIP-only and Instagram shows "not configured".
+    env_file:
+      - path: backend/.env
+        required: false
     environment:
       # inside the container the server must listen on all container interfaces, or the port
       # mapping can't reach it; exposure is limited by the 127.0.0.1 host binding above
@@ -16,6 +20,7 @@ services:
       - data:/data
       - ./backend/.sessions:/sessions   # created by `npm run ig:login` on the host
       - models:/models                  # CLIP weights, downloaded once
+    restart: unless-stopped
 volumes:
   data:
   models:
