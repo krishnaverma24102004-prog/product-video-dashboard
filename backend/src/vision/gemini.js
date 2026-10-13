@@ -154,11 +154,12 @@ function exhaustedReason(kinds) {
  * One structured-JSON request. Each configured model is tried at most once (no backoff sleeps);
  * when all of them fail with quota/transient errors the session breaker opens for the rest of the search.
  */
-export async function generate(parts, schema, { session = createVisionSession(), only = null } = {}) {
+export async function generate(parts, schema, { session = createVisionSession(), only = null, deadline = null } = {}) {
   session.assertAvailable();
   const failures = [];
   const order = only ?? attemptOrder();
-  const callEnd = Date.now() + callBudgetMs();
+  // the 503 retry pass shares the original request's budget (live: a fresh budget let one call run 102 s)
+  const callEnd = deadline ?? Date.now() + callBudgetMs();
   for (const [i, model] of order.entries()) {
     if (i > 0 && callEnd - Date.now() < Math.min(3000, callBudgetMs() / 10)) {
       failures.push({ model, kind: 'timeout', status: 'skipped: request time budget used' });
@@ -230,11 +231,12 @@ export async function generate(parts, schema, { session = createVisionSession(),
   // "high demand" 503s are spikes that often clear within seconds (live: gemini-3.1-flash-lite alternated 503/200).
   // Retry the models that answered 503 once, after a short pause; never the ones that hung (timeouts).
   const spiked = failures.filter((f) => f.status === 503).map((f) => f.model);
-  if (!only && spiked.length && session.remainingMs() > 20000) {
+  const pause = Math.min(1500, callBudgetMs() / 8);
+  if (!only && spiked.length && session.remainingMs() > 20000 && callEnd - Date.now() > pause + Math.min(5000, callBudgetMs() / 4)) {
     for (const m of spiked) benchedUntil.delete(m);
     log.info({ models: spiked }, 'gemini 503 on every model; retrying the 503 models once');
-    await sleep(1500);
-    return generate(parts, schema, { session, only: spiked });
+    await sleep(pause);
+    return generate(parts, schema, { session, only: spiked, deadline: callEnd });
   }
   session.trip(exhaustedReason(failures.map((f) => f.kind)), failures.map((f) => `${f.model}: ${f.status ?? f.kind}`).join(', ') || 'no usable model');
   log.warn({ reason: session.reason, detail: session.detail }, 'all gemini models failed; vision off for the rest of this search');

@@ -75,6 +75,17 @@ describe('gemini circuit breaker', () => {
     expect(session.open).toBe(false);
   });
 
+  it('the 503 retry pass shares the original request budget (no fresh 50 s)', async () => {
+    // first model hangs until the 400 ms budget is nearly gone, the others 503: no time left for a retry pass
+    vi.stubGlobal('fetch', vi.fn((url, init) => (modelOf(url) === 'm-primary'
+      ? new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(init.signal.reason)))
+      : Promise.resolve(resp(503, 'high demand')))));
+    const session = g.createVisionSession({ deadline: Date.now() + 60_000 });
+    const t0 = Date.now();
+    await expect(g.generate(parts, schema, { session })).rejects.toBeInstanceOf(g.VisionUnavailableError);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
   it('retries only the 503 models, not quota (429) ones', async () => {
     const calls = stubFetch((model) => (model === 'm-primary' ? resp(503, 'high demand') : resp(429, QUOTA_BODY)));
     const session = g.createVisionSession({ deadline: Date.now() + 60_000 });
