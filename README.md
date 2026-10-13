@@ -200,13 +200,21 @@ GET routes (`/events` SSE, `/api/img`, history, shortlist) don't need the token,
 
 ## Test evidence
 
-- **Unit and integration tests:** `cd backend && npm test`, 141 tests. They cover dedupe, scoring v2 regressions, query building and order, SSRF, extractors, the Gemini circuit breaker, error classification, the deadline, the watchdog and transactional save, the exact-product judge rules (including `accessory`, the ranked-out cutoff, the held-back catch-up pass and CLIP-only model naming), the optional TikTok source, and the API security layer. They run on temp DBs with a stubbed `fetch`.
-- **Live evaluation, 23 searches (2026-10-13, session 2):** see [`docs/test-results.md`](docs/test-results.md). The code was improved during the session, so rows ran on different versions. In summary:
-  - **Instagram:** ≥20 usable in 22 of 23 searches (the exception: a niche Allbirds colourway, 6). About 19–20/20 correct in the top 20 when the judge was working.
-  - **Meta:** ≥20 usable in 8 of 23 searches. Shortfalls are mostly the source: few active video ads for the exact model (e.g. YETI Rambler 2, AirPods Pro 2 4, Allbirds 5, New Balance 550 3), and the judge correctly rejects other models of the same brand.
+- **Unit and integration tests:** `cd backend && npm test`, **167 tests** in 13 files. They run on temp DBs with a stubbed `fetch`, and cover:
+  - dedupe, and scoring v2 regressions
+  - query building and order
+  - SSRF guards, extractors, and product-image extraction (ProductGroup, Shopify `.json` fallback)
+  - the Gemini circuit breaker, error classification, the per-request budget and the 503 retry
+  - the deadline, the watchdog and transactional save
+  - the exact-product judge rules: `accessory`, strict variants (v4), the ranked-out cutoff, the held-back catch-up pass, and CLIP-only model naming
+  - the optional TikTok source, and the API security layer
+- **Live evaluation, 33 searches (2026-10-13/14):** 23 on the local backend and 10 inside the Docker container. Details in [`docs/test-results.md`](docs/test-results.md). The code was improved during the session, so each row says which version it ran on. In summary:
+  - **Instagram:** ≥20 usable in 29 of 33 searches. About 19–20/20 correct in the top 20 when the judge was working.
+  - **Meta:** ≥20 usable in 12 of 33 searches. Shortfalls are mostly the source: few active video ads for the exact model (e.g. YETI Rambler 2, AirPods Pro 2 4, Allbirds 5, New Balance 550 3), and the judge correctly rejects other models of the same brand.
   - **Best case, healthy judge and all fixes:** **Adidas Samba OG** (37 Instagram / 33 Meta, ≈19/20 and ≈19–20/20 correct) and **Philips OneBlade** (34 / 34, ≈19/20 and 20/20). These are the two searches where 20+20 exact was shown on both sources; **it is not claimed for all products.**
   - **During the Gemini outage** (late in the day, CLIP-only) Meta precision dropped to ≈9/20 (Dyson Supersonic).
-  - **Repeat search:** 0 overlap with the first pass.
+  - **Repeat search:** 0 overlap with the first pass, in both checks (Crocs, and Philips OneBlade in Docker, where 29 Instagram + 57 Meta videos were filtered as seen before).
+  - **Demo video** (3:38, captions on every step): name search with 40/20 + 40/20, product-link search, and a repeat search. It was recorded in Docker while Gemini was overloaded, so it shows the CLIP-only fallback honestly. The mapping of video steps to searches is in `docs/test-results.md`.
   - **AI during the run:** the main Gemini models were unavailable (429/503), so the lite model did the judging, and from mid-afternoon no Gemini model answered reliably.
   - The earlier five-product evaluation (session 1, Meta ≈10–35% correct) is summarised at the end of the same file.
 - **Re-run it:** `node backend/scripts/evaluate.js [--repeat] [--plan plan.json] [--json out.json]`. `plan.json` is `[{label, input, image?}]`, so image-only searches can be included.

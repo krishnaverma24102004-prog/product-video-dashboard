@@ -1,6 +1,18 @@
 # Test results — live evaluation, 2026-10-13 (session 2)
 
-18 live searches (17 products + 1 repeat), run one at a time against the live backend. Instagram used the owner's logged-in session; Meta used the public Ad Library. The code was improved **during** the session (judge v3, see `IMPLEMENTATION-REPORT.md`, Pass 4), so each row says which code version it ran on.
+**33 live searches in total:**
+- 23 against the local backend (rows 1–23)
+- 10 inside the Docker container (rows D1–D10)
+- 5 of the Docker searches (D6–D10) were recorded for the demo video
+
+Searches ran one at a time. Instagram used the owner's logged-in session; Meta used the public Ad Library. The code was improved **during** the session (judge v3, then v4, see `IMPLEMENTATION-REPORT.md`), so each row says which code version it ran on.
+
+**Short version:**
+- **Instagram reached 20 usable in 29 of 33 searches.**
+- **Meta reached 20 in 12 of 33.** Meta shortfalls are mostly source-side: few active video ads for the exact model, plus reseller duplicates.
+- **With a working judge, top-20 precision was ≈19–20/20** on both sources for Adidas Samba OG and Philips OneBlade.
+- **Repeat searches never returned a video twice** (0 overlap in both checks).
+- **Gemini's free tier was overloaded for most of the day.** Many rows therefore show the honest CLIP-only fallback, not the judge.
 
 | Setting | Value |
 |---|---|
@@ -25,6 +37,8 @@
 | **D** | C + fix 3 (product must be visible) + fix 6 (ranked-out candidates not accepted) |
 | **E** | all fixes, judge v3 (D + fix 7: CLIP-only fallback needs the caption to name the model) |
 | **F** | E + five-model free Gemini chain (`gemini-3.5-flash` → `gemini-3.1-flash-lite` → `gemini-flash-latest` → `gemini-3.5-flash-lite` → `gemini-flash-lite-latest`) + optional TikTok source (off) |
+| **G** | F + judge v4 (strict variants) + product-image extraction for ProductGroup/Shopify pages + SSE auto-reconnect + fix 10 (50 s per-request Gemini budget) |
+| **H** | G + fix 11 (retry 503 "high demand" models once) + fix 12 (that retry shares the original 50 s budget). Code in the repo now. |
 
 ## Results
 
@@ -54,15 +68,37 @@
 | 22 | Sony WH-1000XM5 headphones | keyword | F | 34 | 6 | - | 6 (7 other Sony models rejected; ≈130 duplicates) | 241 s (deadline) | lite chain |
 | 23 | Stanley ProTour flip straw tumbler 30 oz (stanley1913.com URL) | URL | F | 36 | 16 | ≈6–8/20 ProTour (rest: other Stanley tumblers judged "variant") | ≈2–4/16 (brand ads, product grids, IceFlow) | 165 s | lite chain; page title/brand/model extracted but **no product image** |
 
-**Docker runs (image built on Windows / Docker Desktop 29.8, container `healthy`):**
+## Docker runs and demo recording
 
-| # | Product | Code | IG | Meta | Notes |
-|---|---|---|---|---|---|
-| D1 | Nike Dunk Low Panda | F | 0 | 29 | Instagram session had expired (the API returned the login page as HTML; same result from the host). Meta, CLIP and the container itself worked. |
-| D2 | Adidas Gazelle | F + judge v4 + image fix | 31 | 16 | New session works in the container. Gemini overloaded: 10 calls, 0 judged; walking the five-model chain took ~2 min per request, so Meta ran only 1 query → fix 10. |
-| D3 | Converse Chuck 70 | + fix 10 | 24 | 8 | Gemini still overloaded (503/429/timeouts), but each request now gives up after 50 s, so Meta ran all 8 queries. The shortfall is duplication plus CLIP-only strictness. |
+The image was built on Windows with Docker Desktop 29.8 and started with `docker compose up -d --build`. The container reported `healthy`. All ten searches below ran **inside the container**, through the dashboard at `http://localhost:4000`.
 
-Fix 10: `GEMINI_CALL_BUDGET_MS` (50 s) caps one Gemini request across the whole model chain, after which the breaker opens and the search continues CLIP-only.
+| # | Time | Product | Input | Code | IG | Meta | Seen before (IG/Meta) | Time taken | Gemini judged / calls | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| D1 | 22:16 | Nike Dunk Low Panda | keyword | F | 0 | 29 | - | 240 s | 14 / 8 | Instagram session had expired (the API returned the login page as HTML; same from the host). Meta, CLIP and the container itself worked. |
+| D2 | 22:24 | Adidas Gazelle | keyword | G (no fix 10) | 31 | 16 | - | 240 s | 0 / 10 | New session works in the container. Walking the five-model chain took ~2 min per request, so Meta ran only 1 query → **fix 10**. |
+| D3 | 22:31 | Converse Chuck 70 | keyword | G | 24 | 8 | - | 218 s | 6 / 8 | Each request now gives up after 50 s, so Meta ran all 8 queries. Shortfall: duplicates plus CLIP-only strictness. |
+| D4 | 22:50 | JBL Flip 6 | keyword | G (new key) | 33 | 27 | - | 108 s | 4 / 7 | New Gemini key: 429 became 503 (quota fine, Google overloaded). |
+| D5 | 22:58 | LEGO Millennium Falcon | keyword | G + fix 11 | 24 | 3 | - | 200 s | 0 / 4 | Every model 503 or timeout. |
+| D6 | 23:10 | **Philips OneBlade** | keyword | G + fix 11 | **32** | **32** | - | 130 s | 23 / 7 | **Demo.** Top cards carry Gemini verdicts ("Exact match: Philips OneBlade brand and model clearly visible"); 61 of 84 videos scored CLIP-only, which the UI states. |
+| D7 | 23:15 | Apple iPhone 15 | amazon.in URL | G + fix 11 | 24 | 1 | - | 240 s | 21 / 17 | **Demo.** Title, photo and identity (Apple · iPhone 15) extracted from the page. Gemini slowness hit the deadline, and Meta reported "Shortfall 1/20" with the reason. |
+| D8 | 23:20 | **Philips OneBlade (repeat of D6)** | keyword | G + fix 11 | 2 | 13 | **29 / 57** | 246 s | 16 / 7 | **Demo, repeat search.** 0 videos in common with D6. The new reels were judged "Exact match". Few new videos exist, and the shortfall lists the queries that found "nothing new". |
+| D9 | 23:30 | Adidas Samba OG | keyword | G + fix 11 | **40** | **40** | - | 148 s | 0 / 3 | **Demo video, part 1.** Gemini fully down: brand unknown (keyword heuristics), all cards CLIP-only, and the amber notice says so. The first analysis call ran 102 s → **fix 12**. |
+| D10 | 23:49 | Allbirds Men's Tree Runner | allbirds.com URL | G + fix 11 | 15 | 1 | - | 209 s | 0 / 5 | **Demo video, part 2.** Title, description, photo and identity "Allbirds (from the product page)" extracted; CLIP compared thumbnails with that photo. |
+
+**Fixes found in this phase:**
+- **Fix 10:** `GEMINI_CALL_BUDGET_MS` (50 s) caps one Gemini request across the whole model chain. After that the breaker opens and the search continues CLIP-only.
+- **Fix 11:** when every model fails and some answered 503 ("high demand"), only those are retried once after a short pause. Models that hung or hit their quota are not retried.
+- **Fix 12:** that retry uses what is left of the original 50 s budget. Before the fix it got a fresh budget, and D9's first call ran 102 s.
+
+**Demo video** (`Product-Video-Discovery-demo-final.mp4`, 3:38, captions on every step, waiting time shown at 8–10x):
+
+| Assignment requirement | Where in the video | Search |
+|---|---|---|
+| Search by product name | steps 1–5 | D9 Adidas Samba OG |
+| 20 + 20 minimum met | step 5 (Instagram 40/20, Meta 40/20) | D9 |
+| Search by product link | steps 6–10 | D10 allbirds.com |
+| Repeat search returns new videos | steps 11–12 ("filtered: 29 seen before") | D8, opened from history |
+| Judge verdicts with a working Gemini | end card and steps 11–12 | D6 / D8 |
 
 Fix 9 (after #20, not yet live-tested): candidates a round's judge cutoff held back are judged in a catch-up pass at the end while the source is short and Gemini budget/time remain (`judgeHeldBack` in `pipeline.js`, unit-tested).
 
@@ -70,7 +106,7 @@ Fix 9 (after #20, not yet live-tested): candidates a round's judge cutoff held b
 - **Instagram ≥20 usable:** 22 of 23 searches. The exception is the niche Allbirds Dasher NZ colourway (6), run during the Gemini outage.
 - **Meta ≥20 usable:** 8 of 23 searches (Ray-Ban, Airwrap, S24 Ultra, Birkenstock, AF1, Samba, Supersonic, OneBlade).
 - **Both ≥20 by count and ≈20/20 correct on both in the same search:** **Adidas Samba OG** and **Philips OneBlade** (healthy lite judge, all fixes). Ray-Ban and Airwrap reached 20+ on both by count, with lower Meta precision.
-- **"Variant" is too broad for product lines with many similar models** (Stanley ProTour vs Quencher H2.0 / IceFlow): the judge accepts sibling models as variants. Not fixed.
+- **"Variant" was too broad for product lines with many similar models** (Stanley ProTour vs Quencher H2.0 / IceFlow): the v3 judge accepted sibling models as variants. **Judge v4** (code version G) defines a variant strictly and rejects an unconfirmed variant whose caption doesn't name the model. It is unit-tested only; no live search with a healthy Gemini ran on v4.
 
 ## Match quality
 
@@ -94,6 +130,9 @@ Fix 9 (after #20, not yet live-tested): candidates a round's judge cutoff held b
 | crocs pass 1 accepted / pass 2 accepted | 54 / 49 |
 | Accepted in **both** passes | **0** |
 | Pass 2 candidates dropped as `seen_before` | 36 Instagram + 9 Meta |
+| Philips OneBlade (Docker) D6 accepted / D8 accepted | 64 / 15 |
+| Accepted in **both** D6 and D8 | **0** |
+| D8 candidates dropped as `seen_before` | 29 Instagram + 57 Meta |
 
 ## Earlier evaluation (session 1)
 
