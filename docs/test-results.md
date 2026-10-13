@@ -7,6 +7,35 @@
 
 Searches ran one at a time. Instagram used the owner's logged-in session; Meta used the public Ad Library. The code was improved **during** the session (judge v3, then v4, see `IMPLEMENTATION-REPORT.md`), so each row says which code version it ran on.
 
+**What was tested:**
+- **Input types:**
+  - product name: 28 searches
+  - product link: amazon.in, allbirds.com (twice), stanley1913.com
+  - photo-only: session 1
+- **Product categories:** footwear, eyewear, beauty devices, phones, earbuds and headphones, watches, drinkware, grooming, toys.
+- **Both required sources on every search:**
+  - Instagram Reels through a logged-in session
+  - Meta Ad Library (public, video ads only)
+  - TikTok only as an optional toggle
+- **Exact-product accuracy:** top-20 thumbnails of each search checked by hand, with browser spot checks of individual ads and reels. Counts alone were not trusted.
+- **Wrong-match types found and fixed:**
+  - other brands and look-alikes
+  - other models of the same brand (iPhone 15 Pro for iPhone 15, Air Max for Air Force 1)
+  - accessories (cases, chargers, protectors)
+  - logo-only ads, and sibling product lines
+- **Repeat searches:** the same product searched twice; overlap counted from the database (0 both times).
+- **De-duplication:** same video ID, same ad copy from resellers, near-identical thumbnails (dHash).
+- **Failure handling, live:**
+  - Gemini quota (429), overload (503) and timeouts
+  - all models down, and the search deadline
+  - an expired Instagram session
+  - sources returning fewer than 20 videos
+- **Free AI options compared** on a hand-labelled 9-ad bench:
+  - five Gemini models plus Gemma 4 on the same key
+  - OpenRouter's free vision models (limits and providers checked)
+- **Docker:** one-command start from a fresh GitHub clone, with and without keys, on new empty volumes; healthcheck; searches inside the container.
+- **Automated:** 167 unit and integration tests, with no live calls. They cover dedupe, scoring, judge rules, query order, SSRF guards, extractors, the circuit breaker, budgets, the deadline, the watchdog, the API security layer and TikTok.
+
 **Short version:**
 - **Instagram reached 20 usable in 29 of 33 searches.**
 - **Meta reached 20 in 12 of 33.** Meta shortfalls are mostly source-side: few active video ads for the exact model, plus reseller duplicates.
